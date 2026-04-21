@@ -7,20 +7,23 @@ st.set_page_config(page_title="ВЛК 2026: CDS Симулятор", layout="wid
 # ==========================================
 # УПРАВЛІННЯ СТАНОМ ТА БАЗА ЗНАНЬ
 # ==========================================
-if 'step' not in st.session_state: st.session_state.step = 0
-if 'patient_id' not in st.session_state: st.session_state.patient_id = str(uuid.uuid4())[:8].upper()
-if 'patient_data' not in st.session_state: st.session_state.patient_data = {"icf_scores": {}}
-if 'paper_data' not in st.session_state: st.session_state.paper_data = {}
-if 'kep_signed' not in st.session_state: st.session_state.kep_signed = False # ВИПРАВЛЕНО: Додано ініціалізацію КЕП
+def init_state():
+    if 'step' not in st.session_state: st.session_state.step = 0
+    if 'patient_id' not in st.session_state: st.session_state.patient_id = str(uuid.uuid4())[:8].upper()
+    if 'patient_data' not in st.session_state: st.session_state.patient_data = {"icf_scores": {}}
+    if 'paper_data' not in st.session_state: st.session_state.paper_data = {}
+    if 'kep_signed' not in st.session_state: st.session_state.kep_signed = False
 
-def set_step(step): st.session_state.step = step
-def reset():
-    for key in ['step', 'patient_data', 'paper_data', 'kep_signed']: # ВИПРАВЛЕНО: Очищення КЕП при скиданні
-        if key in st.session_state: del st.session_state[key]
-    st.session_state.patient_id = str(uuid.uuid4())[:8].upper()
-    st.session_state.kep_signed = False
+init_state()
 
-# Міні-база даних для Графа Знань та Паперового маршруту
+def set_step(step): 
+    st.session_state.step = step
+    
+def reset_all():
+    st.session_state.clear()
+    init_state()
+
+# Міні-база даних 
 KNOWLEDGE_BASE = {
     "Зір": {"icd": "H52.1 (Міопія)", "icf": "b210", "achi": "11200-00 (Офтальмоскопія)", "loinc": "Оптична сила"},
     "Серце": {"icd": "I11.9 (Гіпертонія)", "icf": "b420", "achi": "11700-00 (ЕКГ)", "loinc": "8480-6 (АТ)"},
@@ -45,6 +48,11 @@ def calculate_mcda_score(icf_scores):
     else: status = "Непридатний"
     return score, status, M, S_rest, alpha
 
+# Індикатор прогресу (навігація)
+steps_labels = ["1. Налаштування", "2. Вибір маршруту", "3. CDS Мапінг", "4. Фінальний статус"]
+st.progress((st.session_state.step + 1) / 4, text=f"Етап: {steps_labels[st.session_state.step]}")
+st.write("---")
+
 # ==========================================
 # КРОК 0: СИМУЛЯТОР (НАЛАШТУВАННЯ)
 # ==========================================
@@ -64,13 +72,12 @@ if st.session_state.step == 0:
         st.write("Відмітьте системи, у яких є зафіксовані порушення:")
         
         active_scores = {}
-        # Динамічно створюємо чекбокси і випадайки
         for domain, db in KNOWLEDGE_BASE.items():
-            if st.checkbox(f"Включити домен: {domain} ({db['icd']})"):
+            if st.checkbox(f"Включити домен: {domain} ({db['icd']})", key=f"chk_{domain}"):
                 val = st.selectbox(f"Тяжкість ({db['icf']}):", OPTS, key=f"sel_{domain}")
                 active_scores[domain] = int(val.split("(")[1].split(" ")[0])
 
-    if st.button("Зберегти та Перейти в Кабінет ВЛК ➔", type="primary"):
+    if st.button("Зберегти та Перейти в Кабінет ВЛК ➔", type="primary", key="btn_save_patient"):
         if not active_scores:
             st.error("Будь ласка, оберіть хоча б одне порушення для демонстрації.")
         else:
@@ -95,7 +102,7 @@ elif st.session_state.step == 1:
         "3) Паперовий маршрут (Legacy Mode: Повністю ручне введення МКХ ➔ МКФ ➔ Обстеження)"
     ])
     
-    if st.button("Запустити ➔", type="primary"):
+    if st.button("Запустити ➔", type="primary", key="btn_choose_route"):
         if "Автоматичний" in route: st.session_state.route = 1
         elif "Гібридний" in route: st.session_state.route = 2
         else: st.session_state.route = 3
@@ -107,16 +114,12 @@ elif st.session_state.step == 1:
 elif st.session_state.step == 2:
     pd = st.session_state.patient_data
     
-    # ----------------------------------------
-    # РУТ 1 та 2 (АВТО / ГІБРИД) - ДИНАМІЧНИЙ ГРАФ
-    # ----------------------------------------
     if st.session_state.route in [1, 2]:
         st.title("🧠 Динамічний Граф Знань (CDS Мапінг)")
         st.write("Система автоматично згенерувала дерева доказовості для обраних діагнозів.")
         
-        with st.spinner("Синхронізація ЕСОЗ ↔ ВООЗ ↔ НСЗУ..."): time.sleep(1)
+        with st.spinner("Синхронізація ЕСОЗ ↔ ВООЗ ↔ НСЗУ..."): time.sleep(0.5)
             
-        # Динамічно будуємо колонки тільки для активних хвороб
         active_domains = pd["icf_scores"].keys()
         cols = st.columns(len(active_domains))
         
@@ -143,43 +146,38 @@ elif st.session_state.step == 2:
 
         st.markdown("---")
         
-        # Перевірка неструктурованих даних
         if pd["unstructured"]:
             if st.session_state.route == 1:
                 st.error("❌ АВТО-МАРШРУТ ПЕРЕРВАНО: Виявлено неструктурований запис (Скан PDF). Система потребує Гібридного маршруту та КЕП.")
-                if st.button("⬅️ Назад"): set_step(1); st.rerun()
+                if st.button("⬅️ Назад до вибору маршруту", key="btn_back_route"): 
+                    set_step(1); st.rerun()
             elif st.session_state.route == 2:
                 st.warning("⚠️ ГІБРИДНИЙ РЕЖИМ: Знайдено скан документа. Алгоритм NLP розпізнав: 'Протрузія'.")
                 if not st.session_state.kep_signed:
-                    if st.button("✍️ Валідувати КЕП"): st.session_state.kep_signed = True; st.rerun()
+                    if st.button("✍️ Валідувати КЕП", key="btn_sign_kep"): 
+                        st.session_state.kep_signed = True; st.rerun()
                 else:
                     st.success("✅ КЕП накладено. Дані легалізовано.")
-                    if st.button("Перейти до статусів ➔", type="primary"): set_step(3); st.rerun()
+                    if st.button("Перейти до статусів ➔", type="primary", key="btn_go_status_hybrid"): 
+                        set_step(3); st.rerun()
         else:
             st.success("✅ Всі дані структуровані. Антифрод-матриця відпрацювала.")
-            if st.button("Перейти до статусів ➔", type="primary"): set_step(3); st.rerun()
+            if st.button("Перейти до статусів ➔", type="primary", key="btn_go_status_auto"): 
+                set_step(3); st.rerun()
 
-    # ----------------------------------------
-    # РУТ 3 (ПАПЕРОВИЙ МАРШРУТ) - КАСКАДНІ ВИПАДАЙКИ
-    # ----------------------------------------
     elif st.session_state.route == 3:
         st.title("📝 Паперовий маршрут (Legacy Mode)")
         st.warning("CDS-модуль вимкнено. Лікар має самостійно 'зібрати' зв'язки між класифікаторами для формування висновку.")
         
         st.subheader("Ручне введення даних")
-        
-        # Каскадна форма
         manual_icd = st.selectbox("1. Оберіть діагноз з паперової довідки (МКХ-10):", [db["icd"] for db in KNOWLEDGE_BASE.values()])
-        
-        # Знаходимо ключ домену по вибраному МКХ
         target_domain = next(dom for dom, db in KNOWLEDGE_BASE.items() if db["icd"] == manual_icd)
         
         manual_icf = st.selectbox("2. Визначте порушену функцію (МКФ):", ["b210", "b420", "b710", "b515", "b440", "b230"])
-        manual_achi = st.selectbox("3. Яке обстеження підтверджує це (ACHI)?", ["11700-00 (ЕКГ)", "11200-00 (Офтальмоскопія)", "56013-00 (МРТ)", "30473-00 (Ендоскопія)"])
+        manual_achi = st.selectbox("3. Яке обстеження підтверджує це (ACHI)?", ["11700-00 (ЕКГ)", "11200-00 (Офтальмоскопія)", "56013-00 (МРТ хребта)", "30473-00 (Ендоскопія)"])
         manual_sev = st.selectbox("4. Оцініть тяжкість:", OPTS)
         
-        if st.button("Додати до висновку ➕"):
-            # Перевірка на помилки (демо антифроду в ручному режимі)
+        if st.button("Додати до висновку ➕", key="btn_add_paper"):
             correct_icf = KNOWLEDGE_BASE[target_domain]["icf"]
             if manual_icf != correct_icf:
                 st.error(f"❌ ПОМИЛКА МЕДИЧНОГО КОДУВАННЯ: Для діагнозу {manual_icd} функція має бути {correct_icf}, а не {manual_icf}. ВЛК може бути оскаржена.")
@@ -190,3 +188,56 @@ elif st.session_state.step == 2:
                 
         st.write("---")
         st.write(f"**Зараз у висновку:** {st.session_state.paper_data}")
+        
+        if st.button("Завершити ручний ввід і порахувати ➔", type="primary", key="btn_go_status_paper"):
+            if not st.session_state.paper_data: 
+                st.error("Додайте хоча б один діагноз.")
+            else:
+                st.session_state.patient_data["icf_scores"] = st.session_state.paper_data
+                set_step(3); st.rerun()
+
+# ==========================================
+# КРОК 3: EARLY EXIT ТА MCDA
+# ==========================================
+elif st.session_state.step == 3:
+    pd = st.session_state.patient_data
+    st.title("📋 Фінальний Висновок Rule Engine")
+    
+    is_base_early_exit = any(s == 10 for s in pd["icf_scores"].values())
+    
+    tdv_fail = None
+    if pd["prof"] == "Снайпер" and pd.get("icf_scores", {}).get("Зір", 0) > 0:
+        tdv_fail = "Снайпер: Порушення зору."
+    elif pd["prof"] == "Водолаз" and (pd.get("icf_scores", {}).get("Слух", 0) > 0 or pd.get("icf_scores", {}).get("Дихання", 0) > 0):
+        tdv_fail = "Водолаз: Порушення слуху/дихання."
+        
+    is_tdv_early_exit = tdv_fail is not None
+
+    if is_base_early_exit or is_tdv_early_exit:
+        st.error("🚨 СПРАЦЮВАВ 'EARLY EXIT' (КОРОТКИЙ ВИХІД)")
+        st.markdown("### Загальний статус: **НЕПРИДАТНИЙ**")
+        if is_base_early_exit: st.info("**Базова причина:** Знайдено кваліфікатор .3 (Важке порушення).")
+        if is_tdv_early_exit: st.warning(f"**ТДВ причина:** {tdv_fail} (Таблиця Додаткових Вимог).")
+            
+    else:
+        try:
+            score, status, M, S_rest, alpha = calculate_mcda_score(pd["icf_scores"])
+            
+            if status == "Придатний": st.success(f"⚖️ СТАТУС: **{status.upper()}** (Бал: {score})")
+            else: st.warning(f"⚖️ СТАТУС: **{status.upper()}** (Бал: {score})")
+                
+            st.success(f"🎯 СТАТУС ТДВ: **Придатний до служби '{pd['prof']}'**")
+
+            st.markdown("---")
+            st.subheader("Розшифровка 'Сірої Зони' (MCDA)")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Домінуючий тягар (M)", M)
+            c2.metric("Фоновий тягар (S_rest)", S_rest)
+            c3.metric("Запас міцності (α)", f"{int(alpha*100)}%")
+            st.code(f"M + (S_rest * α)  =>  {M} + ({S_rest} * {alpha}) = {score} балів")
+        except Exception as e:
+            st.error(f"Помилка розрахунку: {e}")
+        
+    st.markdown("---")
+    if st.button("🔄 Почати новий кейс", key="btn_reset"): 
+        reset_all(); st.rerun()
