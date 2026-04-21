@@ -11,12 +11,14 @@ if 'step' not in st.session_state: st.session_state.step = 0
 if 'patient_id' not in st.session_state: st.session_state.patient_id = str(uuid.uuid4())[:8].upper()
 if 'patient_data' not in st.session_state: st.session_state.patient_data = {"icf_scores": {}}
 if 'paper_data' not in st.session_state: st.session_state.paper_data = {}
+if 'kep_signed' not in st.session_state: st.session_state.kep_signed = False # ВИПРАВЛЕНО: Додано ініціалізацію КЕП
 
 def set_step(step): st.session_state.step = step
 def reset():
-    for key in ['step', 'patient_data', 'paper_data']:
+    for key in ['step', 'patient_data', 'paper_data', 'kep_signed']: # ВИПРАВЛЕНО: Очищення КЕП при скиданні
         if key in st.session_state: del st.session_state[key]
     st.session_state.patient_id = str(uuid.uuid4())[:8].upper()
+    st.session_state.kep_signed = False
 
 # Міні-база даних для Графа Знань та Паперового маршруту
 KNOWLEDGE_BASE = {
@@ -188,52 +190,3 @@ elif st.session_state.step == 2:
                 
         st.write("---")
         st.write(f"**Зараз у висновку:** {st.session_state.paper_data}")
-        
-        if st.button("Завершити ручний ввід і порахувати ➔", type="primary"):
-            if not st.session_state.paper_data: st.error("Додайте хоча б один діагноз.")
-            else:
-                # Перезаписуємо дані пацієнта ручними даними для фінального кроку
-                st.session_state.patient_data["icf_scores"] = st.session_state.paper_data
-                set_step(3); st.rerun()
-
-# ==========================================
-# КРОК 3: EARLY EXIT ТА MCDA
-# ==========================================
-elif st.session_state.step == 3:
-    pd = st.session_state.patient_data
-    st.title("📋 Фінальний Висновок Rule Engine")
-    
-    is_base_early_exit = any(s == 10 for s in pd["icf_scores"].values())
-    
-    tdv_fail = None
-    if pd["prof"] == "Снайпер" and pd.get("icf_scores", {}).get("Зір", 0) > 0:
-        tdv_fail = "Снайпер: Порушення зору."
-    elif pd["prof"] == "Водолаз" and (pd.get("icf_scores", {}).get("Слух", 0) > 0 or pd.get("icf_scores", {}).get("Дихання", 0) > 0):
-        tdv_fail = "Водолаз: Порушення слуху/дихання."
-        
-    is_tdv_early_exit = tdv_fail is not None
-
-    if is_base_early_exit or is_tdv_early_exit:
-        st.error("🚨 СПРАЦЮВАВ 'EARLY EXIT' (КОРОТКИЙ ВИХІД)")
-        st.markdown("### Загальний статус: **НЕПРИДАТНИЙ**")
-        if is_base_early_exit: st.info("**Базова причина:** Знайдено кваліфікатор .3 (Важке порушення).")
-        if is_tdv_early_exit: st.warning(f"**ТДВ причина:** {tdv_fail} (Таблиця Додаткових Вимог).")
-            
-    else:
-        score, status, M, S_rest, alpha = calculate_mcda_score(pd["icf_scores"])
-        
-        if status == "Придатний": st.success(f"⚖️ СТАТУС: **{status.upper()}** (Бал: {score})")
-        else: st.warning(f"⚖️ СТАТУС: **{status.upper()}** (Бал: {score})")
-            
-        st.success(f"🎯 СТАТУС ТДВ: **Придатний до служби '{pd['prof']}'**")
-
-        st.markdown("---")
-        st.subheader("Розшифровка 'Сірої Зони' (MCDA)")
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Домінуючий тягар (M)", M)
-        c2.metric("Фоновий тягар (S_rest)", S_rest)
-        c3.metric("Запас міцності (α)", f"{alpha*100}%")
-        st.code(f"M + (S_rest * α)  =>  {M} + ({S_rest} * {alpha}) = {score} балів")
-        
-    st.markdown("---")
-    if st.button("🔄 Почати новий кейс"): reset(); st.rerun()
