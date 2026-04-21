@@ -8,14 +8,10 @@ st.set_page_config(page_title="ВЛК 2026: CDS Симулятор", layout="wid
 # ==========================================
 # УПРАВЛІННЯ СТАНОМ (SESSION STATE)
 # ==========================================
-if 'step' not in st.session_state:
-    st.session_state.step = 0 # 0: Налаштування, 1: Вибір маршруту, 2: Мапінг, 3: Висновок
-if 'patient_id' not in st.session_state:
-    st.session_state.patient_id = str(uuid.uuid4())[:8].upper()
-if 'patient_data' not in st.session_state:
-    st.session_state.patient_data = {}
-if 'kep_signed' not in st.session_state:
-    st.session_state.kep_signed = False
+if 'step' not in st.session_state: st.session_state.step = 0
+if 'patient_id' not in st.session_state: st.session_state.patient_id = str(uuid.uuid4())[:8].upper()
+if 'patient_data' not in st.session_state: st.session_state.patient_data = {}
+if 'kep_signed' not in st.session_state: st.session_state.kep_signed = False
 
 def set_step(step): st.session_state.step = step
 def reset():
@@ -23,7 +19,6 @@ def reset():
     st.session_state.patient_id = str(uuid.uuid4())[:8].upper()
     st.session_state.kep_signed = False
 
-# Математичне ядро MCDA
 def calculate_mcda_score(icf_scores):
     THRESHOLD = 10
     active_maxes = [v for v in icf_scores.values() if v > 0]
@@ -41,183 +36,184 @@ def calculate_mcda_score(icf_scores):
 # КРОК 0: СИМУЛЯТОР (НАЛАШТУВАННЯ ПАЦІЄНТА)
 # ==========================================
 if st.session_state.step == 0:
-    st.title("⚙️ Адмін-панель: Створення профілю пацієнта")
-    st.info("Цей крок прихований від лікаря ВЛК. Тут ми як розробники 'сетапимо' сценарій для демонстрації.")
+    st.title("⚙️ Адмін-панель: Профіль пацієнта (SandBox)")
+    st.info("Цей крок дозволяє налаштувати сценарій для демонстрації роботи Rule Engine різним стейкхолдерам.")
     
-    col1, col2 = st.columns(2)
+    col1, col2 = st.columns([1, 2])
     with col1:
+        st.subheader("Базові дані")
         pib = st.text_input("ПІБ Пацієнта:", "Коваленко Іван Петрович")
-        prof = st.selectbox("Військова посада:", ["Снайпер", "Кухар", "N/A (Без специфіки)"])
-        has_unstructured = st.checkbox("Додати неструктурований запис (Скан МРТ з приватної клініки)", value=True)
+        st.code(f"ID в ЕСОЗ: {st.session_state.patient_id}")
+        prof = st.selectbox("Військова посада (ТДВ):", ["Снайпер", "Водолаз", "Піхотинець (Загальні вимоги)"])
+        has_unstructured = st.checkbox("Симулювати неструктурований запис (Скан МРТ/SNOMED)", value=True)
         
     with col2:
-        st.write("**Налаштування обстежень (Симуляція ЕСОЗ):**")
+        st.subheader("Клінічна картина (Симуляція записів ЕСОЗ)")
+        st.write("Оберіть підтверджені стани з різних доменів:")
         
-        # Домен: Зір (Впливає на снайпера)
-        vision_exam = st.selectbox("Гострота зору (Міопія H52.1):", [
-            "1.0 (Норма) -> 0 балів", 
-            "0.6 (Легке порушення) -> 1 бал", 
-            "0.2 (Помірне порушення) -> 3 бали",
-            "Сліпота (Важке порушення) -> 10 балів (Early Exit)"
-        ], index=1)
+        opts = [
+            "Норма (0 балів)", 
+            "Легке порушення .1 (1 бал)", 
+            "Помірне порушення .2 (3 бали)",
+            "Важке порушення .3 (10 балів) -> Early Exit"
+        ]
         
-        # Домен: Серце
-        heart_exam = st.selectbox("Артеріальний тиск (Гіпертонія I11.9):", [
-            "Відсутній -> 0 балів",
-            "АТ 140/90 (Легке) -> 1 бал",
-            "АТ 160/100 (Помірне) -> 3 бали",
-            "АТ 180/110+ (Важке) -> 10 балів (Early Exit)"
-        ], index=2)
+        # 6 Доменів
+        c1, c2 = st.columns(2)
+        with c1:
+            v_vis = st.selectbox("👁️ Зір (b210 - Міопія/Катаракта):", opts, index=1)
+            v_hrt = st.selectbox("🫀 Серце (b420 - Гіпертонія/ІХС):", opts, index=2)
+            v_bck = st.selectbox("🦴 Спина (b710 - Остеохондроз):", opts, index=0)
+        with c2:
+            v_stm = st.selectbox("🍏 Травлення (b515 - Гастрит/Виразка):", opts, index=1)
+            v_res = st.selectbox("🫁 Дихальна (b440 - Астма):", opts, index=0)
+            v_ear = st.selectbox("👂 Слух (b230 - Туговухість):", opts, index=0)
 
-    if st.button("Зберегти та Перейти в Кабінет ВЛК ➔", type="primary"):
-        # Парсимо бали з обраних рядків
+    if st.button("Зберегти та Перейти в Кабінет ВЛК ➔", type="primary", use_container_width=True):
         st.session_state.patient_data = {
-            "pib": pib,
-            "id": st.session_state.patient_id,
-            "prof": prof,
-            "unstructured": has_unstructured,
+            "pib": pib, "id": st.session_state.patient_id, "prof": prof, "unstructured": has_unstructured,
             "icf_scores": {
-                "Зір (b210)": int(vision_exam.split("-> ")[1].split(" ")[0]),
-                "Серце (b420)": int(heart_exam.split("-> ")[1].split(" ")[0])
+                "Зір": int(v_vis.split("(")[1].split(" ")[0]),
+                "Серце": int(v_hrt.split("(")[1].split(" ")[0]),
+                "Спина": int(v_bck.split("(")[1].split(" ")[0]),
+                "Травлення": int(v_stm.split("(")[1].split(" ")[0]),
+                "Дихання": int(v_res.split("(")[1].split(" ")[0]),
+                "Слух": int(v_ear.split("(")[1].split(" ")[0])
             }
         }
-        set_step(1)
-        st.rerun()
+        set_step(1); st.rerun()
 
 # ==========================================
-# КРОК 1: КАБІНЕТ ЛІКАРЯ (ВИБІР МАРШРУТУ)
+# КРОК 1: ВИБІР МАРШРУТУ
 # ==========================================
 elif st.session_state.step == 1:
     pd = st.session_state.patient_data
-    st.title("🏥 Кабінет ВЛК 2026-402")
+    st.title("🏥 Кабінет Лікаря ВЛК")
+    st.success(f"**Пацієнт:** {pd['pib']} | **ID:** {pd['id']} | **Посада (ТДВ):** {pd['prof']}")
     
-    # Картка пацієнта
-    st.success(f"**Пацієнт:** {pd['pib']} | **ID:** {pd['id']} | **Цільова посада:** {pd['prof']}")
-    
-    st.header("Вибір маршруту Clinical Decision Support (CDS)")
-    route = st.radio("Оберіть стадію зрілості системи:", [
-        "1) Повністю автоматичний маршрут (CDS 100%, авто-мапінг)",
-        "2) Гібридний маршрут (Потребує ручної валідації КЕП для неструктурованих даних)"
+    st.header("Оберіть сценарій маршрутизації (Maturity Model)")
+    route = st.radio("Рівень автоматизації CDS:", [
+        "1) Повністю автоматичний маршрут (CDS працює на 100%, авто-мапінг усіх реєстрів)",
+        "2) Гібридний маршрут (CDS діє, але потребує ручної валідації КЕП для неструктурованих даних)"
     ])
     
-    if st.button("Далі ➔", type="primary"):
+    if st.button("Запустити Rule Engine ➔", type="primary"):
         st.session_state.route = 1 if "автоматичний" in route else 2
-        set_step(2)
-        st.rerun()
+        set_step(2); st.rerun()
 
 # ==========================================
-# КРОК 2: МАПІНГ ТА ВАЛІДАЦІЯ
+# КРОК 2: МАПІНГ ТА ГРАФ ЗНАНЬ
 # ==========================================
 elif st.session_state.step == 2:
     pd = st.session_state.patient_data
-    st.title("🧠 Архітектура Мапінгу (Граф Знань CDS)")
-    st.write("Система автоматично розгортає дерево кодів з ЕСОЗ для валідації Наказу №402.")
+    st.title("🧠 Архітектура Мапінгу (Knowledge Graph)")
+    st.markdown("Презентаційний зріз того, як система створює **семантичні зв'язки** між розрізненими державними та міжнародними реєстрами.")
     
-    with st.spinner("Зв'язок з ЕСОЗ... Завантаження пакетів НСЗУ..."):
-        time.sleep(1)
+    with st.spinner("Синхронізація ЕСОЗ ↔ ВООЗ ↔ НСЗУ..."): time.sleep(1)
         
-    # Візуалізація Мапінгу
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("### Дерево Діагнозів (ICF Core Sets)")
+    t1, t2, t3 = st.columns(3)
+    
+    with t1:
+        st.info("Шари 1-2: ВООЗ (ICF Core Sets)")
+        st.write("Трансляція діагнозу в функції")
         st.code("""
-[ЕСОЗ]: I11.9 (Гіпертонічна хвороба)
-  └── ICF Core Set Triggered
-       └── МКФ: b420 (Функції артеріального тиску)
-            └── Значення: Валідація...
-
-[ЕСОЗ]: H52.1 (Міопія)
-  └── ICF Core Set Triggered
-       └── МКФ: b210 (Гострота зору)
-            └── Значення: Валідація...
+[ЕСОЗ]: I11.9 (Гіпертонія)
+ └── Протокол: WHO ICF
+      └── Trigger: b420 (Функції АТ)
+      └── Trigger: b410 (Функції серця)
         """, language="yaml")
-
-    with col2:
-        st.markdown("### Антифрод Мапінг (НСЗУ ➔ Наказ 402)")
+        
+    with t2:
+        st.info("Шар 3: НСЗУ (ACHI Докази)")
+        st.write("Пошук інструментальних підтверджень")
         st.code("""
-[Матриця Валідації]:
+[Правило ПМГ Пакет 9]:
 IF b420 > 0:
-  EXPECT ACHI: 11700-00 (ЕКГ)
-  CHECK LOINC: 8480-6 (Сист. АТ) 
-
-IF b210 > 0:
-  EXPECT ACHI: 11200-00 (Офтальмоскопія)
-  CHECK LOINC: Оптична сила
+ └── EXPECT ACHI: 11700-00 (ЕКГ)
+ └── EXPECT ACHI: 55113-00 (ЕхоКГ)
+        """, language="yaml")
+        
+    with t3:
+        st.info("Шар 4: МОУ (Наказ №402)")
+        st.write("Звірка результатів з нормами")
+        st.code("""
+[Клінічна валідація]:
+IF ACHI 11700-00 EXIST:
+ └── CHECK LOINC: 8480-6 (АТ)
+      └── IF > 159 -> Severity .2
+      └── IF > 180 -> Severity .3
         """, language="yaml")
 
     st.markdown("---")
     
-    # Логіка маршрутів
+    # Логіка маршрутів і неструктурованих даних
     if pd["unstructured"]:
         if st.session_state.route == 1:
-            st.error("❌ АВТОМАТИЧНИЙ МАРШРУТ ПЕРЕРВАНО: Знайдено неструктурований запис (PDF Скан МРТ). Система не може самостійно встановити рівень довіри до приватних клінік без КЕП лікаря ВЛК. Будь ласка, оберіть Гібридний маршрут.")
-            if st.button("⬅️ Повернутися до вибору маршруту"):
-                set_step(1); st.rerun()
+            st.error("❌ АВТОМАТИЗАЦІЮ ПЕРЕРВАНО: Виявлено неструктурований запис (Скан-копія PDF від приватної клініки). За поточними стандартами довіри до даних, система не може прийняти рішення без КЕП лікаря ВЛК. Оберіть Гібридний маршрут.")
+            if st.button("⬅️ Повернутися до вибору маршруту"): set_step(1); st.rerun()
                 
         elif st.session_state.route == 2:
-            st.warning("⚠️ ГІБРИДНИЙ РЕЖИМ: Виявлено неструктурований PDF-документ (МРТ хребта, клініка 'Борис'). Алгоритм NLP (SNOMED) пропонує код: 266249003 (Протрузія).")
+            st.warning("⚠️ ГІБРИДНИЙ РЕЖИМ: Знайдено скан МРТ (Домен Спина). Алгоритм NLP (SNOMED-мапінг) розпізнав: '266249003 (Протрузія L4-L5)'.")
             if not st.session_state.kep_signed:
-                if st.button("✍️ Підтвердити та підписати КЕП лікаря ВЛК"):
+                if st.button("✍️ Валідувати даний запис та накласти КЕП лікаря"):
                     st.session_state.kep_signed = True
                     st.rerun()
             else:
-                st.success("✅ КЕП накладено. Дані легалізовано для Rule Engine.")
-                pd["icf_scores"]["Спина (b710)"] = 1 # Додаємо легке порушення після підпису
-                if st.button("Перейти до розрахунку статусів (Наказ 402) ➔", type="primary"):
-                    set_step(3); st.rerun()
+                st.success("✅ КЕП накладено. Юридичну відповідальність підтверджено. Дані легалізовано для MCDA.")
+                if pd["icf_scores"]["Спина"] == 0: pd["icf_scores"]["Спина"] = 1
+                if st.button("Перейти до розрахунку статусів ➔", type="primary"): set_step(3); st.rerun()
     else:
-        st.success("✅ Всі дані структуровані. Антифрод валідацію ПМГ пройдено автоматично.")
-        if st.button("Перейти до розрахунку статусів (Наказ 402) ➔", type="primary"):
-            set_step(3); st.rerun()
+        st.success("✅ Всі дані структуровані. Антифрод-матриця підтвердила достовірність діагнозів в ЕСОЗ.")
+        if st.button("Перейти до розрахунку статусів ➔", type="primary"): set_step(3); st.rerun()
 
 # ==========================================
-# КРОК 3: ФІНАЛЬНИЙ СТАТУС (EARLY EXIT / MCDA)
+# КРОК 3: EARLY EXIT ТА MCDA
 # ==========================================
 elif st.session_state.step == 3:
     pd = st.session_state.patient_data
-    st.title("📋 Фінальний Висновок ВЛК")
+    st.title("📋 Фінальний Висновок Rule Engine")
     
-    # Шукаємо Важкі порушення (10 балів) для Early Exit
-    is_early_exit = any(score == 10 for score in pd["icf_scores"].values())
+    # 1. Перевірка на базовий Early Exit (Важке порушення .3)
+    is_base_early_exit = any(s == 10 for s in pd["icf_scores"].values())
     
-    # Перевірка додаткових вимог (Снайпер)
-    sniper_fail = (pd["prof"] == "Снайпер") and (pd["icf_scores"].get("Зір (b210)", 0) > 0)
+    # 2. Перевірка на TDV Early Exit (Таблиця Додаткових Вимог)
+    tdv_fail_reason = None
+    if pd["prof"] == "Снайпер" and pd["icf_scores"]["Зір"] > 0:
+        tdv_fail_reason = "Посада Снайпер: Виявлено порушення зору (Таблиця 'В' Наказу 402)."
+    elif pd["prof"] == "Водолаз" and (pd["icf_scores"]["Слух"] > 0 or pd["icf_scores"]["Дихання"] > 0):
+        tdv_fail_reason = "Посада Водолаз: Виявлено порушення слуху або дихальної системи."
+        
+    is_tdv_early_exit = tdv_fail_reason is not None
 
     # ВІЗУАЛІЗАЦІЯ EARLY EXIT
-    if is_early_exit:
-        st.error("🚨 СПРАЦЮВАВ EARLY EXIT (КОРОТКИЙ ВИХІД)")
-        st.markdown("### Загальний статус: **НЕПРИДАТНИЙ ДО ВІЙСЬКОВОЇ СЛУЖБИ**")
-        st.info("Система виявила кваліфікатор тяжкості .3 (Важке порушення). Згідно з прямим мапінгом Наказу №402, застосовано імперативну статтю. Обчислення за гібридною моделлю (MCDA) зупинено.")
-    
-    # ВІЗУАЛІЗАЦІЯ MCDA (Якщо немає Early Exit)
+    if is_base_early_exit or is_tdv_early_exit:
+        st.error("🚨 СПРАЦЮВАВ 'EARLY EXIT' (КОРОТКИЙ ВИХІД)")
+        st.markdown("### Загальний статус: **НЕПРИДАТНИЙ**")
+        
+        if is_base_early_exit:
+            st.info("**Причина (Базова):** Знайдено кваліфікатор тяжкості .3 (Важке порушення). Прямий мапінг застосував імперативну статтю. MCDA обчислення зупинено для збереження обчислювальних ресурсів.")
+        if is_tdv_early_exit:
+            st.warning(f"**Причина (ТДВ):** Спрацював конфлікт з Таблицею Додаткових Вимог. {tdv_fail_reason} MCDA обчислення зупинено.")
+            
+    # ВІЗУАЛІЗАЦІЯ MCDA (Сіра зона)
     else:
         score, status, M, S_rest, alpha = calculate_mcda_score(pd["icf_scores"])
         
-        # Відображення основного статусу
-        if status == "Придатний":
-            st.success(f"⚖️ ЗАГАЛЬНИЙ СТАТУС: **{status.upper()}** (Бал: {score})")
-        else:
-            st.warning(f"⚖️ ЗАГАЛЬНИЙ СТАТУС: **{status.upper()}** (Бал: {score})")
+        if status == "Придатний": st.success(f"⚖️ СТАТУС: **{status.upper()}** (Бал: {score})")
+        else: st.warning(f"⚖️ СТАТУС: **{status.upper()}** (Бал: {score})")
             
-        # Блок додаткових вимог (Снайпер конфлікт)
-        if sniper_fail:
-            st.error("🎯 СТАТУС ЗА ПОСАДОЮ: **Непридатний до служби на посаді 'Снайпер'**")
-            st.write("*(Обґрунтування: Виявлено порушення зору b210. Навіть легке порушення порушує Таблицю 'В' додаткових вимог Наказу 402 для даної спеціальності).*")
-        elif pd["prof"] != "N/A (Без специфіки)":
-            st.success(f"🎯 СТАТУС ЗА ПОСАДОЮ: **Придатний до служби на посаді '{pd['prof']}'**")
+        st.success(f"🎯 СТАТУС ТДВ: **Придатний до служби на посаді '{pd['prof']}'** (Конфліктів не виявлено)")
 
-        # Розшифровка MCDA
         st.markdown("---")
-        st.subheader("Розшифровка гібридної моделі (Explainable AI)")
-        st.write("Оскільки прямих підстав для повного списання (Early Exit) не знайдено, статус розраховано за алгоритмом динамічного запасу міцності.")
+        st.subheader("Розшифровка 'Сірої Зони' (Explainable AI)")
+        st.write("Прямих підстав для списання (Early Exit) не знайдено. Статус розраховано за гібридною MCDA моделлю (AMA-асимптота).")
         
-        col_m1, col_m2, col_m3 = st.columns(3)
-        col_m1.metric("Базовий тягар (M)", M, "Найважча хвороба")
-        col_m2.metric("Фоновий тягар (S_rest)", S_rest, "Сума супутніх")
-        col_m3.metric("Запас міцності (α)", alpha, f"(10 - {M}) / 10")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Домінуючий тягар (M)", M, "MAX серед векторів")
+        c2.metric("Фоновий тягар (S_rest)", S_rest, "Сума супутніх")
+        c3.metric("Запас міцності (α)", f"{alpha*100}%", f"(10 - {M}) / 10")
         
-        st.code(f"MCDA Score = M + (S_rest * α)  =>  {M} + ({S_rest} * {alpha}) = {score}", language="python")
+        st.code(f"Формула: M + (S_rest * α)  =>  {M} + ({S_rest} * {alpha}) = {score} балів", language="python")
         
     st.markdown("---")
-    if st.button("🔄 Почати новий кейс"):
-        reset(); st.rerun()
+    if st.button("🔄 Почати новий кейс"): reset(); st.rerun()
