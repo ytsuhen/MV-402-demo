@@ -5,28 +5,6 @@ import time
 st.set_page_config(page_title="ВЛК 2026: CDS Симулятор", layout="wide", page_icon="🏥")
 
 # ==========================================
-# БОКОВЕ МЕНЮ (ІНСТРУКЦІЯ ДЛЯ СТЕЙКХОЛДЕРІВ)
-# ==========================================
-with st.sidebar:
-    st.header("📖 Пам'ятка для комісії")
-    st.markdown("Цей симулятор дозволяє протестувати 3 ключові механіки нашого Rule Engine:")
-    
-    with st.expander("🛡️ Захист від фроду (MCDA)", expanded=True):
-        st.write("* **Як тест:ті:** Оберіть 4-5 хвороб з тяжкістю 'Легке' або 'Помірне'.")
-        st.write("* **Результат:** MCDA-асимптота зупинить набір балів до 10. Статус 'Непридатний' заблоковано.")
-        
-    with st.expander("⚡ Короткий вихід (Early Exit)", expanded=False):
-        st.write("* **Як тестувати:** Дайте хоча б одній хворобі 'Важке порушення .3'.")
-        st.write("* **Результат:** Алгоритм миттєво списує пацієнта за прямою статтею Наказу 402.")
-        
-    with st.expander("🎯 Конфлікт ТДВ (Спецпосади)", expanded=False):
-        st.write("* **Як тестувати:** Посада 'Снайпер' + 'Легке' порушення зору.")
-        st.write("* **Результат:** Загалом Придатний, але система блокує призначення на цільову посаду.")
-        
-    st.markdown("---")
-    st.caption("Версія прототипу: 1.0. (CDS Sandbox)")
-
-# ==========================================
 # УПРАВЛІННЯ СТАНОМ ТА БАЗА ЗНАНЬ
 # ==========================================
 def init_state():
@@ -55,7 +33,13 @@ KNOWLEDGE_BASE = {
     "Слух": {"icd": "H90 (Туговухість)", "icf": "b230", "achi": "11309-00 (Аудіометрія)", "loinc": "Поріг чутності"}
 }
 
-OPTS = ["Легке порушення .1 (1 бал)", "Помірне порушення .2 (3 бали)", "Важке порушення .3 (10 балів) -> Early Exit"]
+# Словник тяжкості (Ховаємо бали від користувача)
+SEVERITY_MAP = {
+    "Легке порушення (.1)": 1,
+    "Помірне порушення (.2)": 3,
+    "Важке порушення (.3)": 10
+}
+OPTS = list(SEVERITY_MAP.keys())
 
 def calculate_mcda_score(icf_scores):
     THRESHOLD = 10
@@ -65,10 +49,36 @@ def calculate_mcda_score(icf_scores):
     S_rest = sum(active_maxes) - M
     alpha = (THRESHOLD - M) / THRESHOLD
     score = round(M + (S_rest * alpha), 2)
-    if score < 3.0: status = "Придатний"
-    elif score < 10.0: status = "Обмежено придатний"
-    else: status = "Непридатний"
+    
+    # Офіційні статуси Наказу №402
+    if score < 3.0: 
+        status = "Придатний"
+    elif score < 10.0: 
+        status = "Придатний до служби у військових частинах забезпечення, ТЦК та СП"
+    else: 
+        status = "Непридатний"
+        
     return score, status, M, S_rest, alpha
+
+# БОКОВЕ МЕНЮ (ІНСТРУКЦІЯ ДЛЯ СТЕЙКХОЛДЕРІВ)
+with st.sidebar:
+    st.header("📖 Пам'ятка для комісії")
+    st.markdown("Цей симулятор дозволяє протестувати 3 ключові механіки нашого Rule Engine:")
+    
+    with st.expander("🛡️ Захист від фроду (MCDA)", expanded=True):
+        st.write("* **Як тестувати:** Оберіть 4-5 хвороб з тяжкістю 'Легке' або 'Помірне'.")
+        st.write("* **Результат:** MCDA-асимптота зупинить набір балів до 10. Статус 'Непридатний' заблоковано.")
+        
+    with st.expander("⚡ Короткий вихід (Early Exit)", expanded=False):
+        st.write("* **Як тестувати:** Дайте хоча б одній хворобі 'Важке порушення .3'.")
+        st.write("* **Результат:** Алгоритм миттєво списує пацієнта за прямою статтею Наказу 402.")
+        
+    with st.expander("🎯 Конфлікт ТДВ (Спецпосади)", expanded=False):
+        st.write("* **Як тестувати:** Посада 'Снайпер' + 'Легке' порушення зору.")
+        st.write("* **Результат:** Загалом Придатний, але система блокує призначення на цільову посаду.")
+        
+    st.markdown("---")
+    st.caption("Версія прототипу: 1.1. (CDS Sandbox)")
 
 # Індикатор прогресу (навігація)
 steps_labels = ["1. Налаштування", "2. Вибір маршруту", "3. CDS Мапінг", "4. Фінальний статус"]
@@ -97,7 +107,7 @@ if st.session_state.step == 0:
         for domain, db in KNOWLEDGE_BASE.items():
             if st.checkbox(f"Включити домен: {domain} ({db['icd']})", key=f"chk_{domain}"):
                 val = st.selectbox(f"Тяжкість ({db['icf']}):", OPTS, key=f"sel_{domain}")
-                active_scores[domain] = int(val.split("(")[1].split(" ")[0])
+                active_scores[domain] = SEVERITY_MAP[val]
 
     if st.button("Зберегти та Перейти в Кабінет ВЛК ➔", type="primary", key="btn_save_patient"):
         if not active_scores:
@@ -147,7 +157,9 @@ elif st.session_state.step == 2:
         
         for idx, domain in enumerate(active_domains):
             db = KNOWLEDGE_BASE[domain]
-            severity = pd["icf_scores"][domain]
+            # Зворотний мапінг балів у текст для красивого виводу
+            severity_text = [k for k, v in SEVERITY_MAP.items() if v == pd["icf_scores"][domain]][0].split(" ")[-1]
+            
             with cols[idx]:
                 st.info(f"Домен: {domain}")
                 st.code(f"""
@@ -156,7 +168,7 @@ elif st.session_state.step == 2:
 
 [2. ВООЗ - Функція]
  └── ICF Core Set: {db['icf']}
- └── Оцінка лікаря: .{severity}
+ └── Оцінка лікаря: {severity_text}
  
 [3. НСЗУ - Доказ]
  └── ACHI: {db['achi']}
@@ -204,9 +216,9 @@ elif st.session_state.step == 2:
             if manual_icf != correct_icf:
                 st.error(f"❌ ПОМИЛКА МЕДИЧНОГО КОДУВАННЯ: Для діагнозу {manual_icd} функція має бути {correct_icf}, а не {manual_icf}. ВЛК може бути оскаржена.")
             else:
-                score_val = int(manual_sev.split("(")[1].split(" ")[0])
+                score_val = SEVERITY_MAP[manual_sev]
                 st.session_state.paper_data[target_domain] = score_val
-                st.success(f"Додано: {target_domain} -> {score_val} балів")
+                st.success(f"Додано: {target_domain} -> {manual_sev}")
                 
         st.write("---")
         st.write(f"**Зараз у висновку:** {st.session_state.paper_data}")
@@ -219,7 +231,7 @@ elif st.session_state.step == 2:
                 set_step(3); st.rerun()
 
 # ==========================================
-# КРОК 3: EARLY EXIT ТА MCDA
+# КРОК 3: ФІНАЛЬНИЙ СТАТУС (EARLY EXIT / MCDA)
 # ==========================================
 elif st.session_state.step == 3:
     pd = st.session_state.patient_data
@@ -236,7 +248,7 @@ elif st.session_state.step == 3:
     is_tdv_early_exit = tdv_fail is not None
 
     if is_base_early_exit or is_tdv_early_exit:
-        st.error("🚨 СПРАЦЮВАВ 'EARLY EXIT' (КОРОТКИЙ ВИХІД)")
+        st.error("🚨 СПРАЦЮВАВ МЕХАНІЗМ 'КОРОТКОГО ВИХОДУ'")
         st.markdown("### Загальний статус: **НЕПРИДАТНИЙ**")
         if is_base_early_exit: st.info("**Базова причина:** Знайдено кваліфікатор .3 (Важке порушення).")
         if is_tdv_early_exit: st.warning(f"**ТДВ причина:** {tdv_fail} (Таблиця Додаткових Вимог).")
@@ -245,10 +257,14 @@ elif st.session_state.step == 3:
         try:
             score, status, M, S_rest, alpha = calculate_mcda_score(pd["icf_scores"])
             
-            if status == "Придатний": st.success(f"⚖️ СТАТУС: **{status.upper()}** (Бал: {score})")
-            else: st.warning(f"⚖️ СТАТУС: **{status.upper()}** (Бал: {score})")
+            if status == "Придатний": 
+                st.success(f"⚖️ СТАТУС: **{status.upper()}** (Бал: {score})")
+            elif status == "Непридатний":
+                st.error(f"⚖️ СТАТУС: **{status.upper()}** (Бал: {score})")
+            else: 
+                st.warning(f"⚖️ СТАТУС: **{status.upper()}** (Бал: {score})")
                 
-            st.success(f"🎯 СТАТУС ТДВ: **Придатний до служби '{pd['prof']}'**")
+            st.success(f"🎯 СТАТУС ТДВ: **Придатний до служби на посаді '{pd['prof']}'**")
 
             st.markdown("---")
             st.subheader("Розшифровка 'Сірої Зони' (MCDA)")
