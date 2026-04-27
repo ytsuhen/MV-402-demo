@@ -102,7 +102,7 @@ with st.sidebar:
     st.markdown("---")
     st.caption("Версія прототипу: 1.5. (Fully Audited & Corrected Mapping)")
 
-st.progress((st.session_state.step + 1) / 4, text=f"Етап: {[st.session_state.step]}")
+st.progress((st.session_state.step + 1) / 4, text=f"Етап: {st.session_state.step + 1}")
 st.write("---")
 
 # ==========================================
@@ -153,7 +153,8 @@ elif st.session_state.step == 2:
         cols = st.columns(len(pd["icf_scores"]))
         for idx, domain in enumerate(pd["icf_scores"].keys()):
             db = KNOWLEDGE_BASE[domain]
-            severity_text =[domain]].split(" ")[-1]
+            # ВИПРАВЛЕНИЙ РЯДОК:
+            severity_text = [k for k, v in SEVERITY_MAP.items() if v == pd["icf_scores"][domain]][0].split(" ")[-1]
             with cols[idx]:
                 st.code(f"[1. Діагноз] МКХ-10: {db['icd']}\n[2. Функція] ICF: {db['icf']} ({severity_text})\n[3. Доказ] ACHI: {db['achi']}\n[4. Валідація] {db['validation']}", language="yaml")
         if pd["unstructured"] and st.session_state.route == 1:
@@ -192,7 +193,7 @@ elif st.session_state.step == 3:
     
     if is_base_exit or tdv_fail:
         st.error("🚨 НЕПРИДАТНИЙ (Ранній вихід)")
-        if is_base_exit: st.info("Базова причина: Знайдено кваліфікатор.3 (Важке порушення).")
+        if is_base_exit: st.info("Базова причина: Знайдено кваліфікатор .3 (Важке порушення).")
         if tdv_fail: st.warning(f"ТДВ причина: {tdv_fail}")
     else:
         try:
